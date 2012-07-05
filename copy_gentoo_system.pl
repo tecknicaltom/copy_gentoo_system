@@ -11,6 +11,8 @@ my %objects;
 use constant PREFIX => $ARGV[0];
 use constant DRYRUN => 1;
 use constant SOURCE => '/dev/sda';
+use constant SOURCE_BOOT => '/dev/sda1';
+use constant SOURCE_ROOT => '/dev/sda2';
 
 # abs_path('/dev/root')
 
@@ -41,7 +43,25 @@ while (<PARTITION>)
 $partition_table =~ s/($last_partition : .* size=)\s*\d+,/$1+,/m;
 
 
+
+# format the partitions
+open FSTAB, '</etc/fstab';
+while(<FSTAB>)
+{
+	chomp;
+	s/#.*//;
+	next unless my ($partition, $mountpoint, $type) = (/^\s*(\S+)\s+(\S+)\s+(\S+).*/);
+	next unless substr($partition, 0, length(SOURCE)) eq SOURCE;
+	my $newpartition = $partition;
+	substr($newpartition, 0, length(SOURCE)) = PREFIX;
+	print "Formatting $newpartition for $partition of type $type at $mountpoint\n";
+	die "Unable to find mkfs for type $type" unless -x "/sbin/mkfs.$type";
+	say "Calling: /sbin/mkfs.$type $newpartition";
+	#system "/sbin/mkfs.$type", $newpartition;
+}
+
 exit;
+
 for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 {
 	open H, "<$contentsFile" or die;
@@ -51,9 +71,9 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 		{
 			$objects{abs_path($1)}->{directory} = 1;
 		}
-		if (/^obj (.*) [0-9a-f]{32} \d+$/)
+		if (/^obj (.*) ([0-9a-f]{32}) \d+$/)
 		{
-			$objects{abs_path($1)}->{file} = 1;
+			$objects{abs_path($1)}->{file} = $2;
 		}
 		if (/^sym (.*\/)([^\/]*) -> (.*) \d+$/)
 		{
