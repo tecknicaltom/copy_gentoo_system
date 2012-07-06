@@ -29,6 +29,15 @@ if (! -b PREFIX)
 }
 
 # read the partition table
+my $total_sectors;
+open PARTITION, "fdisk -l '".PREFIX."'|";
+while (<PARTITION>)
+{
+	$total_sectors = $1 if $_ =~ /, total (\d+) sectors/;
+}
+close PARTITION;
+die "Could not get total sectors on source disk" unless($total_sectors);
+
 my $partition_table;
 my $last_partition;
 open PARTITION, "sfdisk -d '".SOURCE."'|";
@@ -40,8 +49,15 @@ while (<PARTITION>)
 	}
 	$partition_table .= $_;
 }
-$partition_table =~ s/($last_partition : .* size=)\s*\d+,/$1+,/m;
+close PARTITION;
+$partition_table =~ s/($last_partition : start=\s*)(\d+), size=\s*\d+,/"$1$2, size=".($total_sectors-$2).","/me;
+# I don't think this is necessary, but I'm really scared of having the source in the partiion table
+$partition_table =~ s/${\(SOURCE)}/${\(PREFIX)}/gm;
 
+print "---------- BEGIN PARTITION TABLE ----------\n$partition_table\n---------- END PARTITION TABLE ----------\n";
+open SFDISK, "|sfdisk ".PREFIX;
+print SFDISK $partition_table;
+close SFDISK;
 
 
 # format the partitions
@@ -85,6 +101,8 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 	}
 }
 
+#open COPY, '>copy.txt';
+#open DIFF, '>diff.txt';
 for my $obj (sort { my @a = $a =~ m#/#g; my @b = $b =~ m#/#g; $#a <=> $#b } keys %objects)
 {
 	if ($objects{$obj}->{symlink})
