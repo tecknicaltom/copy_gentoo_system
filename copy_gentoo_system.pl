@@ -59,6 +59,8 @@ open SFDISK, "|sfdisk ".PREFIX;
 print SFDISK $partition_table;
 close SFDISK;
 
+# give udev a chance to create partition devices
+sleep 2;
 
 # format the partitions
 open FSTAB, '</etc/fstab';
@@ -73,7 +75,7 @@ while(<FSTAB>)
 	print "Formatting $newpartition for $partition of type $type at $mountpoint\n";
 	die "Unable to find mkfs for type $type" unless -x "/sbin/mkfs.$type";
 	say "Calling: /sbin/mkfs.$type $newpartition";
-	#system "/sbin/mkfs.$type", $newpartition;
+	system "/sbin/mkfs.$type", $newpartition;
 }
 
 exit;
