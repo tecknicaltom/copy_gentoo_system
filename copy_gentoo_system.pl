@@ -7,6 +7,7 @@ use Data::Dumper;
 use Cwd 'abs_path';
 use Digest::MD5::File qw( file_md5_hex );
 use File::Temp qw( tempdir );
+use File::Find;
 
 my %objects;
 
@@ -29,7 +30,10 @@ if (! -b PREFIX)
 }
 
 # copy the MBR
-system "dd", "if=".SOURCE, "of=".PREFIX, "bs=512", "count=1";
+if (!DRYRUN)
+{
+	system "dd", "if=".SOURCE, "of=".PREFIX, "bs=512", "count=1";
+}
 
 # read the partition table
 my $total_sectors;
@@ -39,7 +43,7 @@ while (<PARTITION>)
 	$total_sectors = $1 if $_ =~ /, total (\d+) sectors/;
 }
 close PARTITION;
-die "Could not get total sectors on source disk" unless($total_sectors);
+die "Could not get total sectors on source disk" unless($total_sectors || DRYRUN);
 
 my $partition_table;
 my $last_partition;
@@ -58,9 +62,12 @@ $partition_table =~ s/($last_partition : start=\s*)(\d+), size=\s*\d+,/"$1$2, si
 $partition_table =~ s/${\(SOURCE)}/${\(PREFIX)}/gm;
 
 print "---------- BEGIN PARTITION TABLE ----------\n$partition_table\n---------- END PARTITION TABLE ----------\n";
-open SFDISK, "|sfdisk ".PREFIX;
-print SFDISK $partition_table;
-close SFDISK;
+if (!DRYRUN)
+{
+	open SFDISK, "|sfdisk ".PREFIX;
+	print SFDISK $partition_table;
+	close SFDISK;
+}
 
 # give udev a chance to create partition devices
 sleep 2;
@@ -79,7 +86,10 @@ while(<FSTAB>)
 	print "Formatting $newpartition for $partition of type $type at $mountpoint\n";
 	die "Unable to find mkfs for type $type" unless -x "/sbin/mkfs.$type";
 	say "Calling: /sbin/mkfs.$type $newpartition";
-	system "/sbin/mkfs.$type", $newpartition;
+	if (!DRYRUN)
+	{
+		system "/sbin/mkfs.$type", $newpartition;
+	}
 	$new_boot_partition = $newpartition if($mountpoint eq '/boot');
 }
 
@@ -89,13 +99,16 @@ my $tmp_mount = tempdir();
 say "Using temporary mount point: $tmp_mount";
 
 # copy boot partition
-system "mount", "-o", "ro", "/boot";
-system "mount", $new_boot_partition, $tmp_mount;
-system "rsync", "-aH", "/boot", $tmp_mount."/.";
-system "umount", "/boot";
-system "umount", $tmp_mount;
+if (!DRYRUN)
+{
+	system "mount", "-o", "ro", "/boot";
+	system "mount", $new_boot_partition, $tmp_mount;
+	system "rsync", "-aH", "/boot", $tmp_mount."/.";
+	system "umount", "/boot";
+	system "umount", $tmp_mount;
+}
 
-exit;
+#exit;
 
 for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 {
@@ -120,36 +133,82 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 	}
 }
 
-open COPY, '>copy.txt';
-open DIFF, '>diff.txt';
-for my $obj (sort { my @a = $a =~ m#/#g; my @b = $b =~ m#/#g; $#a <=> $#b } keys %objects)
+my %copy_files;
+my %diff_files;
+my %missing_files;
+#for my $obj (sort { my @a = $a =~ m#/#g; my @b = $b =~ m#/#g; $#a <=> $#b } keys %objects)
+#{
+#	if ($objects{$obj}->{symlink})
+#	{
+#		my $dest = $objects{$obj}->{symlink};
+#		$dest = PREFIX . $dest if($dest =~ /^\//);
+#		#print "SYM $obj -> $dest\n";
+#		#symlink $dest, PREFIX . "/$obj" if(!DRYRUN);
+#		say $obj;
+#	}
+#	elsif ($objects{$obj}->{directory})
+#	{
+#		#mkdir PREFIX . $obj;
+#		say $obj;
+#	}
+#	elsif ($objects{$obj}->{file})
+#	{
+#		#print "OBJ $obj\n";
+#		if (!-e $obj)
+#		{
+#			say "missing $obj";
+#			$missing_files{$obj} = 1;
+#		}
+#		else
+#		{
+#			my $file_md5 = file_md5_hex($obj);
+#			if ($objects{$obj}->{file} eq $file_md5)
+#			{
+#				say "copy $obj";
+#				$copy_files{$obj} = 1;
+#			}
+#			else
+#			{
+#				say "diff $obj";
+#				$diff_files{$obj} = 1;
+#			}
+#		}
+#	}
+#}
+
+for my $whitelist (<whitelists.d/*>)
 {
-	if ($objects{$obj}->{symlink})
+	open WHITELIST, "<$whitelist";
+	while(<WHITELIST>)
 	{
-		my $dest = $objects{$obj}->{symlink};
-		$dest = PREFIX . $dest if($dest =~ /^\//);
-		#print "SYM $obj -> $dest\n";
-		#symlink $dest, PREFIX . "/$obj" if(!DRYRUN);
-		say $obj;
-	}
-	elsif ($objects{$obj}->{directory})
-	{
-		#mkdir PREFIX . $obj;
-		say $obj;
-	}
-	elsif ($objects{$obj}->{file})
-	{
-		#print "OBJ $obj\n";
-		my $file_md5 = file_md5_hex($obj);
-		if ($objects{$obj}->{file} eq $file_md5)
+		s/#.*//;
+		s/^\s*//;
+		s/\s*$//;
+		next unless($_);
+		if(/^(.*)\/\.\.\.$/)
 		{
-			say "copy $obj";
-			say COPY $obj;
+			find(sub { $copy_files{$File::Find::name} = 1; }, $1);
+		}
+		elsif(!-e $_)
+		{
+			$missing_files{$_} = 1;
 		}
 		else
 		{
-			say "diff $obj";
-			say DIFF $obj;
+			$copy_files{$_} = 1;
 		}
 	}
 }
+
+open COPY, '>copy.txt';
+say COPY $_ for(keys %copy_files);
+close COPY;
+
+open DIFF, '>diff.txt';
+say DIFF $_ for(keys %diff_files);
+close DIFF;
+
+open MISSING, '>missing.txt';
+say MISSING $_ for(keys %missing_files);
+close MISSING;
+
