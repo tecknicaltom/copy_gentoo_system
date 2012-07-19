@@ -136,45 +136,45 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 my %copy_files;
 my %diff_files;
 my %missing_files;
-#for my $obj (sort { my @a = $a =~ m#/#g; my @b = $b =~ m#/#g; $#a <=> $#b } keys %objects)
-#{
-#	if ($objects{$obj}->{symlink})
-#	{
-#		my $dest = $objects{$obj}->{symlink};
-#		$dest = PREFIX . $dest if($dest =~ /^\//);
-#		#print "SYM $obj -> $dest\n";
-#		#symlink $dest, PREFIX . "/$obj" if(!DRYRUN);
-#		say $obj;
-#	}
-#	elsif ($objects{$obj}->{directory})
-#	{
-#		#mkdir PREFIX . $obj;
-#		say $obj;
-#	}
-#	elsif ($objects{$obj}->{file})
-#	{
-#		#print "OBJ $obj\n";
-#		if (!-e $obj)
-#		{
-#			say "missing $obj";
-#			$missing_files{$obj} = 1;
-#		}
-#		else
-#		{
-#			my $file_md5 = file_md5_hex($obj);
-#			if ($objects{$obj}->{file} eq $file_md5)
-#			{
-#				say "copy $obj";
-#				$copy_files{$obj} = 1;
-#			}
-#			else
-#			{
-#				say "diff $obj";
-#				$diff_files{$obj} = 1;
-#			}
-#		}
-#	}
-#}
+for my $obj (keys %objects)
+{
+	if ($objects{$obj}->{symlink})
+	{
+		my $dest = $objects{$obj}->{symlink};
+		$dest = PREFIX . $dest if($dest =~ /^\//);
+		#print "SYM $obj -> $dest\n";
+		#symlink $dest, PREFIX . "/$obj" if(!DRYRUN);
+		say $obj;
+	}
+	elsif ($objects{$obj}->{directory})
+	{
+		#mkdir PREFIX . $obj;
+		say $obj;
+	}
+	elsif ($objects{$obj}->{file})
+	{
+		#print "OBJ $obj\n";
+		if (!-e $obj)
+		{
+			say "missing $obj";
+			$missing_files{$obj} = 1;
+		}
+		else
+		{
+			my $file_md5 = file_md5_hex($obj);
+			if ($objects{$obj}->{file} eq $file_md5)
+			{
+				say "copy $obj";
+				$copy_files{$obj} = 1;
+			}
+			else
+			{
+				say "diff $obj";
+				$diff_files{$obj} = 1;
+			}
+		}
+	}
+}
 
 for my $whitelist (<whitelists.d/*>)
 {
@@ -187,7 +187,10 @@ for my $whitelist (<whitelists.d/*>)
 		next unless($_);
 		if(/^(.*)\/\.\.\.$/)
 		{
-			find(sub { $copy_files{$File::Find::name} = 1; }, $1);
+			find(sub {
+					$copy_files{$File::Find::name} = 1;
+					delete $diff_files{$File::Find::name};
+				}, $1);
 		}
 		elsif(!-e $_)
 		{
@@ -196,6 +199,7 @@ for my $whitelist (<whitelists.d/*>)
 		else
 		{
 			$copy_files{$_} = 1;
+			delete $diff_files{$_};
 		}
 	}
 }
@@ -212,3 +216,5 @@ open MISSING, '>missing.txt';
 say MISSING $_ for(keys %missing_files);
 close MISSING;
 
+#sorting
+#for my $obj (sort { my @a = $a =~ m#/#g; my @b = $b =~ m#/#g; $#a <=> $#b } keys %objects)
