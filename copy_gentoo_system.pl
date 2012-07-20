@@ -178,6 +178,7 @@ for my $obj (keys %objects)
 
 for my $whitelist (<whitelists.d/*>)
 {
+	say "using whitelist file $whitelist";
 	open WHITELIST, "<$whitelist";
 	while(<WHITELIST>)
 	{
@@ -185,12 +186,18 @@ for my $whitelist (<whitelists.d/*>)
 		s/^\s*//;
 		s/\s*$//;
 		next unless($_);
-		if(/^(.*)\/\.\.\.$/)
+		say "  using whitelist $_";
+		if (/^(.*)\/\.\.\.(\/.*)?$/)
 		{
+			my $dir = $1;
+			my $glob_end = $2 ? $2 : "";
 			find(sub {
-					$copy_files{$File::Find::name} = 1;
-					delete $diff_files{$File::Find::name};
-				}, $1);
+					for my $file (<${File::Find::name}${glob_end}>)
+					{
+						$copy_files{$file} = 1;
+						delete $diff_files{$file};
+					}
+				}, $dir);
 		}
 		elsif(!-e $_)
 		{
@@ -204,17 +211,19 @@ for my $whitelist (<whitelists.d/*>)
 	}
 }
 
+sub slash_sort(@) {
+	return (sort { my @a = $a =~ m#/#g; my @b = $b =~ m#/#g; $#a <=> $#b or $a cmp $b } @_);
+}
+
 open COPY, '>copy.txt';
-say COPY $_ for(keys %copy_files);
+say COPY $_ for(slash_sort keys %copy_files);
 close COPY;
 
 open DIFF, '>diff.txt';
-say DIFF $_ for(keys %diff_files);
+say DIFF $_ for(slash_sort keys %diff_files);
 close DIFF;
 
 open MISSING, '>missing.txt';
-say MISSING $_ for(keys %missing_files);
+say MISSING $_ for(slash_sort keys %missing_files);
 close MISSING;
 
-#sorting
-#for my $obj (sort { my @a = $a =~ m#/#g; my @b = $b =~ m#/#g; $#a <=> $#b } keys %objects)
