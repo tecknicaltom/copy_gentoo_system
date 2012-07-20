@@ -1,5 +1,5 @@
-/usr/lib64/python2.7/.../*.py
-/usr/lib64/scons-2.0.1/.../*.py
-/usr/lib64/portage/pym/.../*.py
-/usr/lib64/wireshark/python/.../*.py
-/usr/lib64/gobject-introspection/giscanner/.../*.py
+/usr/lib64/python2.7/.../*.py{c,o}
+/usr/lib64/scons-2.0.1/.../*.py{c,o}
+/usr/lib64/portage/pym/.../*.py{c,o}
+/usr/lib64/wireshark/python/.../*.py{c,o}
+/usr/lib64/gobject-introspection/giscanner/.../*.py{c,o}
