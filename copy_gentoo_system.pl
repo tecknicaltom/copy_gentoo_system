@@ -192,7 +192,9 @@ for my $whitelist (<whitelists.d/*>)
 			my $dir = $1;
 			my $glob_end = $2 ? $2 : "";
 			find(sub {
-					for my $file (<${File::Find::name}${glob_end}>)
+					my $glob_pattern = $File::Find::name . $glob_end;
+					$glob_pattern =~ s/ /\\ /g;
+					for my $file (glob($glob_pattern))
 					{
 						$copy_files{$file} = 1;
 						delete $diff_files{$file};
