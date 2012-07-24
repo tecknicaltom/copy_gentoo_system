@@ -30,21 +30,29 @@ if (! -b PREFIX)
 	exit 1 unless(DRYRUN);
 }
 
-# copy the MBR
-if (!DRYRUN)
-{
-	system "dd", "if=".SOURCE, "of=".PREFIX, "bs=512", "count=1";
-}
-
 # read the partition table
 my $total_sectors;
+my $pre_partition_space;
+my $sector_size;
 open PARTITION, "fdisk -l '".PREFIX."'|";
 while (<PARTITION>)
 {
 	$total_sectors = $1 if $_ =~ /, total (\d+) sectors/;
+	$sector_size = $1 if $_ =~ /Units = sectors of .* = (\d+) bytes/;
+	$pre_partition_space = $1 if(!$pre_partition_space && /^\/[^ ]+\s+(?:\*\s+)?(\d+)/);
 }
 close PARTITION;
 die "Could not get total sectors on source disk" unless($total_sectors || DRYRUN);
+die "Could not get sector size on source disk" unless($sector_size || DRYRUN);
+die "Could not get pre-partition space" unless($pre_partition_space || DRYRUN);
+
+# copy the MBR and space before first partition
+if (!DRYRUN)
+{
+	say "running: ".join(" ", ("dd", "if=".SOURCE, "of=".PREFIX, "bs=$sector_size", "count=$pre_partition_space"));
+	system "dd", "if=".SOURCE, "of=".PREFIX, "bs=$sector_size", "count=$pre_partition_space";
+}
+
 
 my $partition_table;
 my $last_partition;
