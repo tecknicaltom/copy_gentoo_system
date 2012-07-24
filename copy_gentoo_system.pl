@@ -8,11 +8,12 @@ use Cwd 'abs_path';
 use Digest::MD5::File qw( file_md5_hex );
 use File::Temp qw( tempdir );
 use File::Find;
+use File::Glob ':glob';
 
 my %objects;
 
 use constant PREFIX => $ARGV[0];
-use constant DRYRUN => 1;
+use constant DRYRUN => 0;
 use constant SOURCE => '/dev/sda';
 #use constant SOURCE_BOOT => '/dev/sda1';
 #use constant SOURCE_ROOT => '/dev/sda2';
@@ -26,7 +27,7 @@ if (@ARGV != 1)
 if (! -b PREFIX)
 {
 	print PREFIX." not a block device!\n";
-#	exit 1;
+	exit 1 unless(DRYRUN);
 }
 
 # copy the MBR
@@ -70,11 +71,13 @@ if (!DRYRUN)
 }
 
 # give udev a chance to create partition devices
+system "fdisk", "-l", PREFIX;
 sleep 2;
 
 # format the partitions
 open FSTAB, '</etc/fstab';
 my $new_boot_partition;
+my $new_root_partition;
 while(<FSTAB>)
 {
 	chomp;
@@ -91,6 +94,7 @@ while(<FSTAB>)
 		system "/sbin/mkfs.$type", $newpartition;
 	}
 	$new_boot_partition = $newpartition if($mountpoint eq '/boot');
+	$new_root_partition = $newpartition if($mountpoint eq '/');
 }
 
 die "Unable to determine boot partition" unless($new_boot_partition);
@@ -187,19 +191,32 @@ for my $whitelist (<whitelists.d/*>)
 		s/\s*$//;
 		next unless($_);
 		say "  using whitelist $_";
-		if (/^(.*)\/\.\.\.(\/.*)?$/)
+		if (/^(.*?)(?:\/\.\.\.(\/.*)?)?$/)
 		{
-			my $dir = $1;
+			my $dir_glob = $1;
 			my $glob_end = $2 ? $2 : "";
-			find(sub {
-					my $glob_pattern = $File::Find::name . $glob_end;
-					$glob_pattern =~ s/ /\\ /g;
-					for my $file (glob($glob_pattern))
-					{
-						$copy_files{$file} = 1;
-						delete $diff_files{$file};
-					}
-				}, $dir);
+			for my $dir (glob($dir_glob))
+			{
+				find(sub {
+						my @files;
+						if ($glob_end)
+						{
+							my $glob_pattern = $File::Find::name;
+							$glob_pattern =~ s/([\[\]\{\}\?\~'"])/\\$1/g;
+							$glob_pattern .= $glob_end;
+							@files = bsd_glob($glob_pattern, "GLOB_QUOTE");
+						}
+						else
+						{
+							@files = ($File::Find::name);
+						}
+						for my $file (@files)
+						{
+							$copy_files{$file} = 1;
+							delete $diff_files{$file};
+						}
+					}, $dir);
+			}
 		}
 		elsif(!-e $_)
 		{
@@ -229,3 +246,10 @@ open MISSING, '>missing.txt';
 say MISSING $_ for(slash_sort keys %missing_files);
 close MISSING;
 
+if (!DRYRUN)
+{
+	system "mount", $new_root_partition, $tmp_mount;
+	say "Going to run: ", join(' ', ("rsync", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/."));
+	system "rsync", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/.";
+	system "umount", $tmp_mount;
+}
