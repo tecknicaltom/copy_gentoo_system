@@ -115,7 +115,7 @@ if (!DRYRUN)
 {
 	system "mount", "-o", "ro", "/boot";
 	system "mount", $new_boot_partition, $tmp_mount;
-	system "rsync", "-aH", "/boot", $tmp_mount."/.";
+	system "rsync", "-aH", "/boot/.", $tmp_mount."/.";
 	system "umount", "/boot";
 	system "umount", $tmp_mount;
 }
