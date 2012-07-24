@@ -45,3 +45,23 @@
 /var/spool/.keep
 /var/state/.keep
 
+/etc/.pwd.lock
+/etc/csh.env
+/etc/env.d/04gcc-x86_64-pc-linux-gnu
+/etc/env.d/05binutils
+/etc/env.d/binutils/config-x86_64-pc-linux-gnu
+/etc/env.d/gcc/config-x86_64-pc-linux-gnu
+/etc/env.d/python/config
+/etc/fstab
+/etc/group
+/etc/ld.so.cache
+/etc/ld.so.conf
+/etc/ld.so.conf.d/05binutils.conf
+/etc/ld.so.conf.d/05gcc-x86_64-pc-linux-gnu.conf
+/etc/localtime
+/etc/make.conf
+/etc/make.conf.catalyst
+/etc/passwd
+/etc/profile.env
+/etc/xml/catalog
+
