@@ -147,12 +147,9 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 		{
 			$objects{abs_path($1)}->{file} = $2;
 		}
-		if (/^sym (.*\/)([^\/]*) -> (.*) \d+$/)
+		if (/^sym (.*) -> (.*) \d+$/)
 		{
-			my ($base, $file, $dest) = ($1, $2, $3);
-			$base = abs_path($base);
-			my $src = $base.($base =~ /\/$/ ? '' : '/').$file;
-			$objects{$src}->{symlink} = $dest;
+			$objects{$1}->{symlink} = 1;
 		}
 	}
 }
@@ -164,16 +161,24 @@ for my $obj (keys %objects)
 {
 	if ($objects{$obj}->{symlink})
 	{
-		my $dest = $objects{$obj}->{symlink};
-		$dest = PREFIX . $dest if($dest =~ /^\//);
+		#my $dest = $objects{$obj}->{symlink};
+		#$dest = PREFIX . $dest if($dest =~ /^\//);
 		#print "SYM $obj -> $dest\n";
 		#symlink $dest, PREFIX . "/$obj" if(!DRYRUN);
-		say $obj;
+		#say $obj;
 	}
 	elsif ($objects{$obj}->{directory})
 	{
 		#mkdir PREFIX . $obj;
-		say $obj;
+		#say $obj;
+		if (!-d $obj)
+		{
+			$missing_files{$obj} = 1;
+		}
+		else
+		{
+			$copy_files{$obj} = 1;
+		}
 	}
 	elsif ($objects{$obj}->{file})
 	{
@@ -188,7 +193,7 @@ for my $obj (keys %objects)
 			my $file_md5 = file_md5_hex($obj);
 			if ($objects{$obj}->{file} eq $file_md5)
 			{
-				say "copy $obj";
+				#say "copy $obj";
 				$copy_files{$obj} = 1;
 			}
 			else
@@ -211,41 +216,64 @@ for my $whitelist (<whitelists.d/*>)
 		s/\s*$//;
 		next unless($_);
 		say "  using whitelist $_";
-		if (/^(.*?)(?:\/\.\.\.(\/.*)?)?$/)
+		if (/^(.*?)(?:(\/\.\.\.)(\/.*)?)?$/)
 		{
 			my $dir_glob = $1;
-			my $glob_end = $2 ? $2 : "";
+			my $dots = $2;
+			my $glob_end = $3 ? $3 : "";
 			for my $dir (glob($dir_glob))
 			{
-				find(sub {
-						my @files;
-						if ($glob_end)
+				if (!$dots)
+				{
+					if(!-e $_)
+					{
+						$missing_files{$_} = 1;
+					}
+					else
+					{
+						if (-l $_)
 						{
-							my $glob_pattern = $File::Find::name;
-							$glob_pattern =~ s/([\[\]\{\}\?\~'"])/\\$1/g;
-							$glob_pattern .= $glob_end;
-							@files = bsd_glob($glob_pattern, "GLOB_QUOTE");
+							$objects{$_}->{symlink} = 1;
 						}
 						else
 						{
-							@files = ($File::Find::name);
+							my $file = abs_path($_);
+							$copy_files{$_} = 1;
+							delete $diff_files{$_};
 						}
-						for my $file (@files)
-						{
-							$copy_files{$file} = 1;
-							delete $diff_files{$file};
-						}
-					}, $dir);
+					}
+				}
+				else
+				{
+					find(sub {
+							my @files;
+							if ($glob_end)
+							{
+								my $glob_pattern = $File::Find::name;
+								$glob_pattern =~ s/([\[\]\{\}\?\~'"])/\\$1/g;
+								$glob_pattern .= $glob_end;
+								@files = bsd_glob($glob_pattern, "GLOB_QUOTE");
+							}
+							else
+							{
+								if (-l $File::Find::name)
+								{
+									$objects{$File::Find::name}->{symlink} = 1;
+								}
+								else
+								{
+									@files = ($File::Find::name);
+								}
+							}
+							for my $file (@files)
+							{
+								my $real_file = abs_path($file);
+								$copy_files{$real_file} = 1;
+								delete $diff_files{$real_file};
+							}
+						}, $dir);
+				}
 			}
-		}
-		elsif(!-e $_)
-		{
-			$missing_files{$_} = 1;
-		}
-		else
-		{
-			$copy_files{$_} = 1;
-			delete $diff_files{$_};
 		}
 	}
 }
@@ -266,10 +294,20 @@ open MISSING, '>missing.txt';
 say MISSING $_ for(slash_sort keys %missing_files);
 close MISSING;
 
+open SYMLINKS, '>symlinks.txt';
+say SYMLINKS $_ for(slash_sort grep {$objects{$_}->{symlink}} keys %objects);
+close SYMLINKS;
+
 if (!DRYRUN)
 {
 	system "mount", $new_root_partition, $tmp_mount;
 	say "Going to run: ", join(' ', ("rsync", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/."));
 	system "rsync", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/.";
+
+	for my $sym (slash_sort grep {$objects{$_}->{symlink}} keys %objects)
+	{
+		link readlink($sym), PREFIX."/$sym";
+	}
+
 	system "umount", $tmp_mount;
 }
