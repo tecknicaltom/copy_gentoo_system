@@ -30,6 +30,18 @@ if (! -b PREFIX)
 	exit 1 unless(DRYRUN);
 }
 
+open MOUNT, "mount|";
+while (<MOUNT>)
+{
+	if(substr($_, 0, length(PREFIX)) eq PREFIX)
+	{
+		say "Error! destination partition mounted!:";
+		say "  $_";
+		exit 2;
+	}
+}
+close MOUNT;
+
 # read the partition table
 my $total_sectors;
 my $pre_partition_space;
