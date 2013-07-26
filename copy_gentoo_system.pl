@@ -18,6 +18,19 @@ use constant SOURCE => '/dev/sda';
 #use constant SOURCE_BOOT => '/dev/sda1';
 #use constant SOURCE_ROOT => '/dev/sda2';
 
+sub run(@)
+{
+	if (DRYRUN)
+	{
+		say "pretend: ".join(" ", @_);
+	}
+	else
+	{
+		say "running: ".join(" ", @_);
+		system @_;
+	}
+}
+
 if (@ARGV != 1)
 {
 	print "Usage: $0 device\n";
@@ -46,10 +59,10 @@ close MOUNT;
 my $total_sectors;
 my $pre_partition_space;
 my $sector_size;
-open PARTITION, "fdisk -l '".PREFIX."'|";
+open PARTITION, "/sbin/fdisk -l '".PREFIX."'|";
 while (<PARTITION>)
 {
-	$total_sectors = $1 if $_ =~ /, total (\d+) sectors/;
+	$total_sectors = $1 if $_ =~ /, (\d+) sectors$/;
 	$sector_size = $1 if $_ =~ /Units = sectors of .* = (\d+) bytes/;
 	$pre_partition_space = $1 if(!$pre_partition_space && /^\/[^ ]+\s+(?:\*\s+)?(\d+)/);
 }
@@ -59,12 +72,7 @@ die "Could not get sector size on source disk" unless($sector_size || DRYRUN);
 die "Could not get pre-partition space" unless($pre_partition_space || DRYRUN);
 
 # copy the MBR and space before first partition
-if (!DRYRUN)
-{
-	say "running: ".join(" ", ("dd", "if=".SOURCE, "of=".PREFIX, "bs=$sector_size", "count=$pre_partition_space"));
-	system "dd", "if=".SOURCE, "of=".PREFIX, "bs=$sector_size", "count=$pre_partition_space";
-}
-
+run("dd", "if=".SOURCE, "of=".PREFIX, "bs=$sector_size", "count=$pre_partition_space");
 
 my $partition_table;
 my $last_partition;
@@ -103,36 +111,47 @@ while(<FSTAB>)
 	chomp;
 	s/#.*//;
 	next unless my ($partition, $mountpoint, $type) = (/^\s*(\S+)\s+(\S+)\s+(\S+).*/);
+	if ($partition =~ m#^/dev/mapper#)
+	{
+		say "looking at mapped device $partition";
+		open DM_STATUS, "cryptsetup status $partition |";
+		while(<DM_STATUS>)
+		{
+			my $mapped_device;
+			if (($mapped_device) = (/^\s*device:\s+(\S+)/))
+			{
+				last unless substr($mapped_device, 0, length(SOURCE)) eq SOURCE;
+				$partition = $mapped_device;
+			}
+		}
+	}
 	next unless substr($partition, 0, length(SOURCE)) eq SOURCE;
+
 	my $newpartition = $partition;
 	substr($newpartition, 0, length(SOURCE)) = PREFIX;
 	print "Formatting $newpartition for $partition of type $type at $mountpoint\n";
 	die "Unable to find mkfs for type $type" unless -x "/sbin/mkfs.$type";
-	say "Calling: /sbin/mkfs.$type $newpartition";
-	if (!DRYRUN)
-	{
-		system "/sbin/mkfs.$type", $newpartition;
-	}
+	run("/sbin/mkfs.$type", $newpartition);
+
 	$new_boot_partition = $newpartition if($mountpoint eq '/boot');
 	$new_root_partition = $newpartition if($mountpoint eq '/');
+	say "... $mountpoint";
 }
 
 die "Unable to determine boot partition" unless($new_boot_partition);
+die "Unable to determine root partition" unless($new_root_partition);
 
 my $tmp_mount = tempdir();
 say "Using temporary mount point: $tmp_mount";
 
 # copy boot partition
-if (!DRYRUN)
-{
-	system "mount", "-o", "ro", "/boot";
-	system "mount", $new_boot_partition, $tmp_mount;
-	system "rsync", "-aH", "/boot/.", $tmp_mount."/.";
-	system "umount", "/boot";
-	system "umount", $tmp_mount;
-}
+run("mount", "-o", "ro", "/boot");
+run("mount", $new_boot_partition, $tmp_mount);
+run("rsync", "--verbose", "-aH", "/boot/.", $tmp_mount."/.");
+run("umount", "/boot");
+run("umount", $tmp_mount);
 
-#exit;
+exit;
 
 for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 {
