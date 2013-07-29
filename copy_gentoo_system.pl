@@ -10,8 +10,10 @@ use File::Temp qw( tempdir );
 use File::Find;
 use File::Glob ':glob';
 use File::Basename;
+$| = 1;
 
 my %objects;
+my @error_files;
 
 use constant PREFIX => $ARGV[0];
 use constant DRYRUN => 0;
@@ -55,6 +57,22 @@ while (<MOUNT>)
 	}
 }
 close MOUNT;
+
+say "********************************************************************************";
+say "**                         OVERWRITE THIS DRIVE?                              **";
+say "********************************************************************************";
+system "fdisk", "-l", PREFIX;
+say "********************************************************************************";
+say "**                             ARE YOU SURE?                                  **";
+say "********************************************************************************";
+say "type yes to continue";
+my $confirmation = <STDIN>;
+chomp $confirmation;
+if($confirmation ne 'yes')
+{
+	say "Confirmation not given. Quitting.";
+	exit;
+}
 
 # read the partition table
 my $total_sectors;
@@ -128,6 +146,7 @@ while(<FSTAB>)
 				last;
 			}
 		}
+		close DM_STATUS;
 	}
 	next unless substr($partition, 0, length(SOURCE)) eq SOURCE;
 
@@ -155,6 +174,7 @@ run("rsync", "--verbose", "-aH", "/boot/.", $tmp_mount."/.");
 run("umount", "/boot");
 run("umount", $tmp_mount);
 
+say "scanning portage files...";
 for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 {
 	open H, "<$contentsFile" or die;
@@ -170,7 +190,10 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 			if(!$final_path)
 			{
 				# blarg http://www.gossamer-threads.com/lists/perl/porters/293164
-				die "?? ($1) $_ $contentsFile";
+				#die "?? ($1) $_ $contentsFile";
+				say "ERROR HERE: $1 $_ $contentsFile";
+				push @error_files, $1;
+				next;
 			}
 			$objects{$final_path}->{file} = $2;
 		}
@@ -181,6 +204,7 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 	}
 }
 
+say "processing portage files...";
 my %copy_files;
 my %diff_files;
 my %missing_files;
@@ -332,6 +356,10 @@ open SYMLINKS, '>symlinks.txt';
 say SYMLINKS $_ for(slash_sort grep {$objects{$_}->{symlink}} keys %objects);
 close SYMLINKS;
 
+open ERROR, '>errors.txt';
+say ERROR $_ for(slash_sort @error_files);
+close ERROR;
+
 if (!DRYRUN)
 {
 	run("mount", $new_root_partition, $tmp_mount);
@@ -369,10 +397,43 @@ if (!DRYRUN)
 	run("chroot", $tmp_mount, "eselect", "python", "set", "1");
 	run("chroot", $tmp_mount, "gcc-config", "1");
 	run("chroot", $tmp_mount, "build-docbook-catalog");
+
+	my @wordlists = map { s/^$tmp_mount//; $_ } glob($tmp_mount."/usr/share/dict/*");
+	run("chroot", $tmp_mount, "create-cracklib-dict", @wordlists);
+
 	if($root_partition_mapper)
 	{
 		run("chroot", $tmp_mount, "sed", "-i", "s#$root_partition_mapper#$new_root_partition#g", "/etc/fstab");
 	}
+
+	# configure users
+	{
+		run("rsync", "--verbose", "-aH", "/etc/passwd", $tmp_mount."/etc");
+		my @users;
+		my $shadow;
+		open SHADOW, "</etc/shadow";
+		while(<SHADOW>)
+		{
+			if(s/^([^:]*):(\$\d\$[^:]*)/$1:*/)
+			{
+				push @users, $1;
+			}
+			$shadow .= $_;
+		}
+		close SHADOW;
+		open NEW_SHADOW, ">$tmp_mount/etc/shadow";
+		print NEW_SHADOW $shadow;
+		close NEW_SHADOW;
+		chmod 0600, "$tmp_mount/etc/shadow";
+
+		say "----------------------------------";
+		for my $user (@users)
+		{
+			say "Enter password for user '$user'";
+			run("chroot", $tmp_mount, "passwd", $user);
+		}
+	}
+
 #
 #	run("umount", "$tmp_mount/dev/shm", "$tmp_mount/dev/pts", "$tmp_mount/dev");
 #	run("umount", "-l", "$tmp_mount/sys");
