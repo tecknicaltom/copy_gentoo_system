@@ -1,0 +1,2 @@
+# for some reason, this file is necessary but the hash is never right
+/etc/env.d/gcc/x86_64-pc-linux-gnu-*

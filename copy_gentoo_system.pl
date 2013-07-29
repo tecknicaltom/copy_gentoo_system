@@ -9,6 +9,7 @@ use Digest::MD5::File qw( file_md5_hex );
 use File::Temp qw( tempdir );
 use File::Find;
 use File::Glob ':glob';
+use File::Basename;
 
 my %objects;
 
@@ -106,6 +107,7 @@ sleep 2;
 open FSTAB, '</etc/fstab';
 my $new_boot_partition;
 my $new_root_partition;
+my $root_partition_mapper;
 while(<FSTAB>)
 {
 	chomp;
@@ -121,7 +123,9 @@ while(<FSTAB>)
 			if (($mapped_device) = (/^\s*device:\s+(\S+)/))
 			{
 				last unless substr($mapped_device, 0, length(SOURCE)) eq SOURCE;
+				$root_partition_mapper = $partition if($mountpoint eq '/');
 				$partition = $mapped_device;
+				last;
 			}
 		}
 	}
@@ -151,8 +155,6 @@ run("rsync", "--verbose", "-aH", "/boot/.", $tmp_mount."/.");
 run("umount", "/boot");
 run("umount", $tmp_mount);
 
-exit;
-
 for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 {
 	open H, "<$contentsFile" or die;
@@ -164,7 +166,13 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 		}
 		if (/^obj (.*) ([0-9a-f]{32}) \d+$/)
 		{
-			$objects{abs_path($1)}->{file} = $2;
+			my $final_path = abs_path($1);
+			if(!$final_path)
+			{
+				# blarg http://www.gossamer-threads.com/lists/perl/porters/293164
+				die "?? ($1) $_ $contentsFile";
+			}
+			$objects{$final_path}->{file} = $2;
 		}
 		if (/^sym (.*) -> (.*) \d+$/)
 		{
@@ -224,7 +232,9 @@ for my $obj (keys %objects)
 	}
 }
 
-for my $whitelist (<whitelists.d/*>)
+my $exe_path = dirname(__FILE__);
+my $whitelists_glob = "$exe_path/whitelists.d/*";
+for my $whitelist (glob($whitelists_glob))
 {
 	say "using whitelist file $whitelist";
 	open WHITELIST, "<$whitelist";
@@ -240,30 +250,34 @@ for my $whitelist (<whitelists.d/*>)
 			my $dir_glob = $1;
 			my $dots = $2;
 			my $glob_end = $3 ? $3 : "";
+			say "    dir_glob: [$dir_glob] dots: [$dots] glob_end: [$glob_end]";
 			for my $dir (glob($dir_glob))
 			{
+				say "      dir: [$dir]";
 				if (!$dots)
 				{
-					if(!-e $_)
+					say "    no dots";
+					if(!-e $dir)
 					{
-						$missing_files{$_} = 1;
+						$missing_files{$dir} = 1;
 					}
 					else
 					{
-						if (-l $_)
+						if (-l $dir)
 						{
-							$objects{$_}->{symlink} = 1;
+							$objects{$dir}->{symlink} = 1;
 						}
 						else
 						{
-							my $file = abs_path($_);
-							$copy_files{$_} = 1;
-							delete $diff_files{$_};
+							#my $file = abs_path($dir);
+							$copy_files{$dir} = 1;
+							delete $diff_files{$dir};
 						}
 					}
 				}
 				else
 				{
+					say "    dots";
 					find(sub {
 							my @files;
 							if ($glob_end)
@@ -271,7 +285,8 @@ for my $whitelist (<whitelists.d/*>)
 								my $glob_pattern = $File::Find::name;
 								$glob_pattern =~ s/([\[\]\{\}\?\~'"])/\\$1/g;
 								$glob_pattern .= $glob_end;
-								@files = bsd_glob($glob_pattern, "GLOB_QUOTE");
+								@files = bsd_glob($glob_pattern, GLOB_QUOTE|GLOB_BRACE);
+								say "glob_pattern [$glob_pattern] :\n",Dumper(\@files);
 							}
 							else
 							{
@@ -319,14 +334,49 @@ close SYMLINKS;
 
 if (!DRYRUN)
 {
-	system "mount", $new_root_partition, $tmp_mount;
-	say "Going to run: ", join(' ', ("rsync", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/."));
-	system "rsync", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/.";
+	run("mount", $new_root_partition, $tmp_mount);
+	run("rsync", "--verbose", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/.");
 
 	for my $sym (slash_sort grep {$objects{$_}->{symlink}} keys %objects)
 	{
-		link readlink($sym), PREFIX."/$sym";
+		my $old = readlink($sym);
+		my $new = $tmp_mount."/$sym";
+		if(DRYRUN)
+		{
+			say "pretend: $old -> $new";
+		}
+		else
+		{
+			say "link $old -> $new";
+			my $ret = symlink $old, $new;
+			if(!$ret)
+			{
+				say "ERROR CREATING SYMLINK $!";
+			}
+		}
 	}
 
-	system "umount", $tmp_mount;
+	run("mkdir", "-m", "666", "$tmp_mount/proc");
+	run("mount", "-t", "proc", "none", "$tmp_mount/proc");
+
+	run("mkdir", "-m", "666", "$tmp_mount/sys");
+	run("mount", "--rbind", "/sys", "$tmp_mount/sys");
+
+	run("mkdir", "-m", "766", "$tmp_mount/dev");
+	run("mount", "--rbind", "/dev", "$tmp_mount/dev");
+
+
+	run("chroot", $tmp_mount, "eselect", "python", "set", "1");
+	run("chroot", $tmp_mount, "gcc-config", "1");
+	run("chroot", $tmp_mount, "build-docbook-catalog");
+	if($root_partition_mapper)
+	{
+		run("chroot", $tmp_mount, "sed", "-i", "s#$root_partition_mapper#$new_root_partition#g", "/etc/fstab");
+	}
+#
+#	run("umount", "$tmp_mount/dev/shm", "$tmp_mount/dev/pts", "$tmp_mount/dev");
+#	run("umount", "-l", "$tmp_mount/sys");
+#	run("umount", "$tmp_mount/proc");
+#	run("umount", $tmp_mount);
 }
+say "umount $tmp_mount/dev/{shm,pts,} $tmp_mount/proc ; umount -l $tmp_mount/sys ; umount $tmp_mount ; rmdir $tmp_mount";
