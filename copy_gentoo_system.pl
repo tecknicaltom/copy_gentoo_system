@@ -396,7 +396,16 @@ if (!DRYRUN)
 
 	run("chroot", $tmp_mount, "eselect", "python", "set", "1");
 	run("chroot", $tmp_mount, "gcc-config", "1");
+	run("chroot", $tmp_mount, "binutils-config", "1");
 	run("chroot", $tmp_mount, "build-docbook-catalog");
+	run("chroot", $tmp_mount, "eselect", "vi", "set", "1");
+	my $opengl = `eselect opengl show`;
+	run("chroot", $tmp_mount, "eselect", "opengl", "set", $opengl);
+	open MESA_CONF, "eselect mesa show|";
+	while(<MESA_CONF>)
+	{
+		run("chroot", $tmp_mount, "eselect", "mesa", "set", split /\s+/, $_);
+	}
 
 	my @wordlists = map { s/^$tmp_mount//; $_ } glob($tmp_mount."/usr/share/dict/*");
 	run("chroot", $tmp_mount, "create-cracklib-dict", @wordlists);
