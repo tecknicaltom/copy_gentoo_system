@@ -61,3 +61,4 @@
 /bin/sh
 /usr/lib
 /boot/
+/etc/rc.conf

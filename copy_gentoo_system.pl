@@ -384,13 +384,32 @@ if (!DRYRUN)
 		}
 	}
 
+	# The following devices and symlinks will be necessary after reboot
+	run("mkdir", "-m", "766", "$tmp_mount/dev");
+	run("mknod", "-m", "622", "$tmp_mount/dev/console", "c", 5, 1);
+	run("mknod", "-m", "666", "$tmp_mount/dev/null", "c", 1, 3);
+	run("mknod", "-m", "666", "$tmp_mount/dev/zero", "c", 1, 5);
+	run("mknod", "-m", "666", "$tmp_mount/dev/ptmx", "c", 5, 2);
+	run("mknod", "-m", "666", "$tmp_mount/dev/tty", "c", 5, 0);
+	run("mknod", "-m", "444", "$tmp_mount/dev/random", "c", 1, 8);
+	run("mknod", "-m", "444", "$tmp_mount/dev/urandom", "c", 1, 9);
+	run("chown", "-v", "root:root", "$tmp_mount/dev/console");
+	run("chown", "-v", "root:root", "$tmp_mount/dev/ptmx");
+	run("chown", "-v", "root:root", "$tmp_mount/dev/tty");
+	run("ln", "-sv", "/proc/self/fd", "$tmp_mount/dev/fd");
+	run("ln", "-sv", "/proc/self/fd/0", "$tmp_mount/dev/fd/stdin");
+	run("ln", "-sv", "/proc/self/fd/1", "$tmp_mount/dev/fd/stdout");
+	run("ln", "-sv", "/proc/self/fd/2", "$tmp_mount/dev/fd/stderr");
+	run("ln", "-sv", "/proc/kcore", "$tmp_mount/core");
+	run("mkdir", "-v", "$tmp_mount/dev/pts");
+	run("mkdir", "-v", "$tmp_mount/dev/shm");
+
 	run("mkdir", "-m", "666", "$tmp_mount/proc");
 	run("mount", "-t", "proc", "none", "$tmp_mount/proc");
 
 	run("mkdir", "-m", "666", "$tmp_mount/sys");
 	run("mount", "--rbind", "/sys", "$tmp_mount/sys");
 
-	run("mkdir", "-m", "766", "$tmp_mount/dev");
 	run("mount", "--rbind", "/dev", "$tmp_mount/dev");
 
 
