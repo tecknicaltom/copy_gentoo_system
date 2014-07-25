@@ -82,7 +82,7 @@ open PARTITION, "/sbin/fdisk -l '".PREFIX."'|";
 while (<PARTITION>)
 {
 	$total_sectors = $1 if $_ =~ /, (\d+) sectors$/;
-	$sector_size = $1 if $_ =~ /Units = sectors of .* = (\d+) bytes/;
+	$sector_size = $1 if $_ =~ /Units[ =:]* sectors of .* = (\d+) bytes/;
 	$pre_partition_space = $1 if(!$pre_partition_space && /^\/[^ ]+\s+(?:\*\s+)?(\d+)/);
 }
 close PARTITION;
@@ -397,9 +397,9 @@ if (!DRYRUN)
 	run("chown", "-v", "root:root", "$tmp_mount/dev/ptmx");
 	run("chown", "-v", "root:root", "$tmp_mount/dev/tty");
 	run("ln", "-sv", "/proc/self/fd", "$tmp_mount/dev/fd");
-	run("ln", "-sv", "/proc/self/fd/0", "$tmp_mount/dev/fd/stdin");
-	run("ln", "-sv", "/proc/self/fd/1", "$tmp_mount/dev/fd/stdout");
-	run("ln", "-sv", "/proc/self/fd/2", "$tmp_mount/dev/fd/stderr");
+#	run("ln", "-sv", "/proc/self/fd/0", "$tmp_mount/dev/fd/stdin");
+#	run("ln", "-sv", "/proc/self/fd/1", "$tmp_mount/dev/fd/stdout");
+#	run("ln", "-sv", "/proc/self/fd/2", "$tmp_mount/dev/fd/stderr");
 	run("ln", "-sv", "/proc/kcore", "$tmp_mount/core");
 	run("mkdir", "-v", "$tmp_mount/dev/pts");
 	run("mkdir", "-v", "$tmp_mount/dev/shm");
@@ -412,12 +412,16 @@ if (!DRYRUN)
 
 	run("mount", "--rbind", "/dev", "$tmp_mount/dev");
 
+	# eselect-awk is still masked, nobody owns this symlink...
+	run("chroot", $tmp_mount, "ln", "-sv", "gawk", "/usr/bin/awk");
+	run("chroot", $tmp_mount, "ln", "-sv", "../usr/bin/gawk", "/bin/awk");
 
 	run("chroot", $tmp_mount, "eselect", "python", "set", "1");
 	run("chroot", $tmp_mount, "gcc-config", "1");
 	run("chroot", $tmp_mount, "binutils-config", "1");
 	run("chroot", $tmp_mount, "build-docbook-catalog");
 	run("chroot", $tmp_mount, "eselect", "vi", "set", "1");
+
 	my $opengl = `eselect opengl show`;
 	run("chroot", $tmp_mount, "eselect", "opengl", "set", $opengl);
 	open MESA_CONF, "eselect mesa show|";
