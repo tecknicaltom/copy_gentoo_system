@@ -15,8 +15,8 @@ $| = 1;
 my %objects;
 my @error_files;
 
-use constant PREFIX => $ARGV[0];
-use constant DRYRUN => 0;
+use constant DESTINATION => $ARGV[0];
+use constant DRYRUN => 1;
 use constant SOURCE => '/dev/sda';
 #use constant SOURCE_BOOT => '/dev/sda1';
 #use constant SOURCE_ROOT => '/dev/sda2';
@@ -40,16 +40,16 @@ if (@ARGV != 1)
 	exit 0;
 }
 
-if (! -b PREFIX)
+if (! -b DESTINATION)
 {
-	print PREFIX." not a block device!\n";
+	print DESTINATION." not a block device!\n";
 	exit 1 unless(DRYRUN);
 }
 
 open MOUNT, "mount|";
 while (<MOUNT>)
 {
-	if(substr($_, 0, length(PREFIX)) eq PREFIX)
+	if(substr($_, 0, length(DESTINATION)) eq DESTINATION)
 	{
 		say "Error! destination partition mounted!:";
 		say "  $_";
@@ -61,7 +61,7 @@ close MOUNT;
 say "********************************************************************************";
 say "**                         OVERWRITE THIS DRIVE?                              **";
 say "********************************************************************************";
-system "fdisk", "-l", PREFIX;
+system "/sbin/fdisk", "-l", DESTINATION;
 say "********************************************************************************";
 say "**                             ARE YOU SURE?                                  **";
 say "********************************************************************************";
@@ -78,7 +78,7 @@ if($confirmation ne 'yes')
 my $total_sectors;
 my $pre_partition_space;
 my $sector_size;
-open PARTITION, "/sbin/fdisk -l '".PREFIX."'|";
+open PARTITION, "/sbin/fdisk -l '".SOURCE."'|";
 while (<PARTITION>)
 {
 	$total_sectors = $1 if $_ =~ /, (\d+) sectors$/;
@@ -91,7 +91,8 @@ die "Could not get sector size on source disk" unless($sector_size || DRYRUN);
 die "Could not get pre-partition space" unless($pre_partition_space || DRYRUN);
 
 # copy the MBR and space before first partition
-run("dd", "if=".SOURCE, "of=".PREFIX, "bs=$sector_size", "count=$pre_partition_space");
+run("dd", "if=".SOURCE, "of=".DESTINATION, "bs=$sector_size", "count=$pre_partition_space");
+exit;
 
 my $partition_table;
 my $last_partition;
@@ -107,18 +108,18 @@ while (<PARTITION>)
 close PARTITION;
 $partition_table =~ s/($last_partition : start=\s*)(\d+), size=\s*\d+,/"$1$2, size=".($total_sectors-$2).","/me;
 # I don't think this is necessary, but I'm really scared of having the source in the partiion table
-$partition_table =~ s/${\(SOURCE)}/${\(PREFIX)}/gm;
+$partition_table =~ s/${\(SOURCE)}/${\(DESTINATION)}/gm;
 
 print "---------- BEGIN PARTITION TABLE ----------\n$partition_table\n---------- END PARTITION TABLE ----------\n";
 if (!DRYRUN)
 {
-	open SFDISK, "|sfdisk ".PREFIX;
+	open SFDISK, "|sfdisk ".DESTINATION;
 	print SFDISK $partition_table;
 	close SFDISK;
 }
 
 # give udev a chance to create partition devices
-system "fdisk", "-l", PREFIX;
+system "fdisk", "-l", DESTINATION;
 sleep 2;
 
 # format the partitions
@@ -151,7 +152,7 @@ while(<FSTAB>)
 	next unless substr($partition, 0, length(SOURCE)) eq SOURCE;
 
 	my $newpartition = $partition;
-	substr($newpartition, 0, length(SOURCE)) = PREFIX;
+	substr($newpartition, 0, length(SOURCE)) = DESTINATION;
 	print "Formatting $newpartition for $partition of type $type at $mountpoint\n";
 	die "Unable to find mkfs for type $type" unless -x "/sbin/mkfs.$type";
 	run("/sbin/mkfs.$type", $newpartition);
@@ -213,14 +214,14 @@ for my $obj (keys %objects)
 	if ($objects{$obj}->{symlink})
 	{
 		#my $dest = $objects{$obj}->{symlink};
-		#$dest = PREFIX . $dest if($dest =~ /^\//);
+		#$dest = DESTINATION . $dest if($dest =~ /^\//);
 		#print "SYM $obj -> $dest\n";
-		#symlink $dest, PREFIX . "/$obj" if(!DRYRUN);
+		#symlink $dest, DESTINATION . "/$obj" if(!DRYRUN);
 		#say $obj;
 	}
 	elsif ($objects{$obj}->{directory})
 	{
-		#mkdir PREFIX . $obj;
+		#mkdir DESTINATION . $obj;
 		#say $obj;
 		if (!-d $obj)
 		{
