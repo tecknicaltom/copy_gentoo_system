@@ -418,7 +418,14 @@ if (!DRYRUN)
 
 	run("chroot", $tmp_mount, "eselect", "python", "set", "1");
 	run("chroot", $tmp_mount, "gcc-config", "1");
-	run("chroot", $tmp_mount, "binutils-config", "1");
+	open BINUTILS_CONF, '-|', "binutils -l";
+	while(<BINUTILS_CONF>)
+	{
+		if(/^ \[(\d+)\].*\*$/)
+		{
+			run("chroot", $tmp_mount, "binutils-config", $1);
+		}
+	}
 	run("chroot", $tmp_mount, "build-docbook-catalog");
 	run("chroot", $tmp_mount, "eselect", "vi", "set", "1");
 
@@ -432,6 +439,15 @@ if (!DRYRUN)
 
 	my @wordlists = map { s/^$tmp_mount//; $_ } glob($tmp_mount."/usr/share/dict/*");
 	run("chroot", $tmp_mount, "create-cracklib-dict", @wordlists);
+
+	open BASHCOMP_CONF, '-|', "eselect bashcomp list --global";
+	while(<BASHCOMP_CONF>)
+	{
+		if(/^ \[(\d+)\].*\*$/)
+		{
+			run("chroot", $tmp_mount, "eselect", "bashcomp", "enable", "--global", $1);
+		}
+	}
 
 	if($root_partition_mapper)
 	{
