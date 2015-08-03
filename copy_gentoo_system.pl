@@ -16,9 +16,9 @@ my %objects;
 my @error_files;
 
 use constant DESTINATION => $ARGV[0];
-use constant DRYRUN => 1;
+use constant DRYRUN => 0;
 use constant SOURCE => '/dev/sda';
-use constant JUSTFILES => 1;
+use constant JUSTFILES => 0;
 #use constant SOURCE_BOOT => '/dev/sda1';
 #use constant SOURCE_ROOT => '/dev/sda2';
 
@@ -299,18 +299,18 @@ for my $whitelist (glob($whitelists_glob))
 		if (/^(.*?)(?:(\/\.\.\.)(\/.*)?)?$/)
 		{
 			my $dir_glob = $1;
-			my $dots = $2;
+			my $dots = $2 ? $2 : "";
 			my $glob_end = $3 ? $3 : "";
-			say "    dir_glob: [$dir_glob] dots: [$dots] glob_end: [$glob_end]";
+			#say "    dir_glob: [$dir_glob] dots: [$dots] glob_end: [$glob_end]";
 			for my $dir (glob($dir_glob))
 			{
-				say "      dir: [$dir]";
+				#say "      dir: [$dir]";
 				if (!$dots)
 				{
-					say "    no dots";
 					if(!-e $dir)
 					{
 						$missing_files{$dir} = 1;
+						say "    WARNING: whitelisted file ($dir) not found";
 					}
 					else
 					{
@@ -328,35 +328,43 @@ for my $whitelist (glob($whitelists_glob))
 				}
 				else
 				{
-					say "    dots";
-					find(sub {
-							my @files;
-							if ($glob_end)
-							{
-								my $glob_pattern = $File::Find::name;
-								$glob_pattern =~ s/([\[\]\{\}\?\~'"])/\\$1/g;
-								$glob_pattern .= $glob_end;
-								@files = bsd_glob($glob_pattern, GLOB_QUOTE|GLOB_BRACE);
-								say "glob_pattern [$glob_pattern] :\n",Dumper(\@files);
-							}
-							else
-							{
-								if (-l $File::Find::name)
+					if(-e $dir)
+					{
+						find(sub {
+								my @files;
+								if ($glob_end)
 								{
-									$objects{$File::Find::name}->{symlink} = 1;
+									my $glob_pattern = $File::Find::name;
+									$glob_pattern =~ s/([\[\]\{\}\?\~'"])/\\$1/g;
+									$glob_pattern .= $glob_end;
+									@files = bsd_glob($glob_pattern, GLOB_QUOTE|GLOB_BRACE);
+									say "    glob_pattern [$glob_pattern] :";
+									say join("\n", map { "      $_" } @files) if(@files);
 								}
 								else
 								{
-									@files = ($File::Find::name);
+									if (-l $File::Find::name)
+									{
+										$objects{$File::Find::name}->{symlink} = 1;
+									}
+									else
+									{
+										@files = ($File::Find::name);
+									}
 								}
-							}
-							for my $file (@files)
-							{
-								my $real_file = abs_path($file);
-								$copy_files{$real_file} = 1;
-								delete $diff_files{$real_file};
-							}
-						}, $dir);
+								for my $file (@files)
+								{
+									my $real_file = abs_path($file);
+									$copy_files{$real_file} = 1;
+									delete $diff_files{$real_file};
+								}
+							}, $dir);
+					}
+					else
+					{
+						$missing_files{$dir} = 1;
+						say "    WARNING: whitelisted file ($dir) not found";
+					}
 				}
 			}
 		}
@@ -386,7 +394,6 @@ close SYMLINKS;
 open ERROR, '>errors.txt';
 say ERROR $_ for(slash_sort @error_files);
 close ERROR;
-exit;
 
 if (!(JUSTFILES || DRYRUN))
 {
@@ -516,4 +523,6 @@ if (!(JUSTFILES || DRYRUN))
 #	run("umount", "$tmp_mount/proc");
 #	run("umount", $tmp_mount);
 }
+
 say "umount $tmp_mount/dev/{shm,pts,} $tmp_mount/proc ; umount -l $tmp_mount/sys ; umount $tmp_mount ; rmdir $tmp_mount";
+
