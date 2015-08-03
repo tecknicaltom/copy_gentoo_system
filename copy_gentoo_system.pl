@@ -235,7 +235,7 @@ for my $obj (keys %objects)
 		$eta = sprintf "%0dm%02ds", int($expected_remaining/60), $expected_remaining % 60;
 	}
 
-	printf clearline()."%d / %d (%0.02f%%) ETA: %s", $objects_processed, $num_objects, $objects_processed / $num_objects, $eta;
+	printf clearline()."%d / %d (%0.02f%%) ETA: %s", $objects_processed, $num_objects, 100*$objects_processed / $num_objects, $eta;
 	if ($objects{$obj}->{symlink})
 	{
 		#my $dest = $objects{$obj}->{symlink};
