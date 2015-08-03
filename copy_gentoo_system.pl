@@ -18,6 +18,7 @@ my @error_files;
 use constant DESTINATION => $ARGV[0];
 use constant DRYRUN => 1;
 use constant SOURCE => '/dev/sda';
+use constant JUSTFILES => 1;
 #use constant SOURCE_BOOT => '/dev/sda1';
 #use constant SOURCE_ROOT => '/dev/sda2';
 
@@ -46,134 +47,138 @@ if (! -b DESTINATION)
 	exit 1 unless(DRYRUN);
 }
 
-open MOUNT, "mount|";
-while (<MOUNT>)
-{
-	if(substr($_, 0, length(DESTINATION)) eq DESTINATION)
-	{
-		say "Error! destination partition mounted!:";
-		say "  $_";
-		exit 2;
-	}
-}
-close MOUNT;
-
-say "********************************************************************************";
-say "**                         OVERWRITE THIS DRIVE?                              **";
-say "********************************************************************************";
-system "/sbin/fdisk", "-l", DESTINATION;
-say "********************************************************************************";
-say "**                             ARE YOU SURE?                                  **";
-say "********************************************************************************";
-say "type yes to continue";
-my $confirmation = <STDIN>;
-chomp $confirmation;
-if($confirmation ne 'yes')
-{
-	say "Confirmation not given. Quitting.";
-	exit;
-}
-
-# read the partition table
-my $total_sectors;
-my $pre_partition_space;
-my $sector_size;
-open PARTITION, "/sbin/fdisk -l '".SOURCE."'|";
-while (<PARTITION>)
-{
-	$total_sectors = $1 if $_ =~ /, (\d+) sectors$/;
-	$sector_size = $1 if $_ =~ /Units[ =:]* sectors of .* = (\d+) bytes/;
-	$pre_partition_space = $1 if(!$pre_partition_space && /^\/[^ ]+\s+(?:\*\s+)?(\d+)/);
-}
-close PARTITION;
-die "Could not get total sectors on source disk" unless($total_sectors || DRYRUN);
-die "Could not get sector size on source disk" unless($sector_size || DRYRUN);
-die "Could not get pre-partition space" unless($pre_partition_space || DRYRUN);
-
-# copy the MBR and space before first partition
-run("dd", "if=".SOURCE, "of=".DESTINATION, "bs=$sector_size", "count=$pre_partition_space");
-exit;
-
-my $partition_table;
-my $last_partition;
-open PARTITION, "sfdisk -d '".SOURCE."'|";
-while (<PARTITION>)
-{
-	if (/^([^ ]+) : .* size=\s*(\d+),/ && $2)
-	{
-		$last_partition = $1;
-	}
-	$partition_table .= $_;
-}
-close PARTITION;
-$partition_table =~ s/($last_partition : start=\s*)(\d+), size=\s*\d+,/"$1$2, size=".($total_sectors-$2).","/me;
-# I don't think this is necessary, but I'm really scared of having the source in the partiion table
-$partition_table =~ s/${\(SOURCE)}/${\(DESTINATION)}/gm;
-
-print "---------- BEGIN PARTITION TABLE ----------\n$partition_table\n---------- END PARTITION TABLE ----------\n";
-if (!DRYRUN)
-{
-	open SFDISK, "|sfdisk ".DESTINATION;
-	print SFDISK $partition_table;
-	close SFDISK;
-}
-
-# give udev a chance to create partition devices
-system "fdisk", "-l", DESTINATION;
-sleep 2;
-
-# format the partitions
-open FSTAB, '</etc/fstab';
 my $new_boot_partition;
 my $new_root_partition;
 my $root_partition_mapper;
-while(<FSTAB>)
+my $tmp_mount;
+
+if(!JUSTFILES)
 {
-	chomp;
-	s/#.*//;
-	next unless my ($partition, $mountpoint, $type) = (/^\s*(\S+)\s+(\S+)\s+(\S+).*/);
-	if ($partition =~ m#^/dev/mapper#)
+	open MOUNT, "mount|";
+	while (<MOUNT>)
 	{
-		say "looking at mapped device $partition";
-		open DM_STATUS, "cryptsetup status $partition |";
-		while(<DM_STATUS>)
+		if(substr($_, 0, length(DESTINATION)) eq DESTINATION)
 		{
-			my $mapped_device;
-			if (($mapped_device) = (/^\s*device:\s+(\S+)/))
-			{
-				last unless substr($mapped_device, 0, length(SOURCE)) eq SOURCE;
-				$root_partition_mapper = $partition if($mountpoint eq '/');
-				$partition = $mapped_device;
-				last;
-			}
+			say "Error! destination partition mounted!:";
+			say "  $_";
+			exit 2;
 		}
-		close DM_STATUS;
 	}
-	next unless substr($partition, 0, length(SOURCE)) eq SOURCE;
+	close MOUNT;
 
-	my $newpartition = $partition;
-	substr($newpartition, 0, length(SOURCE)) = DESTINATION;
-	print "Formatting $newpartition for $partition of type $type at $mountpoint\n";
-	die "Unable to find mkfs for type $type" unless -x "/sbin/mkfs.$type";
-	run("/sbin/mkfs.$type", $newpartition);
+	say "********************************************************************************";
+	say "**                         OVERWRITE THIS DRIVE?                              **";
+	say "********************************************************************************";
+	system "/sbin/fdisk", "-l", DESTINATION;
+	say "********************************************************************************";
+	say "**                             ARE YOU SURE?                                  **";
+	say "********************************************************************************";
+	say "type yes to continue";
+	my $confirmation = <STDIN>;
+	chomp $confirmation;
+	if($confirmation ne 'yes')
+	{
+		say "Confirmation not given. Quitting.";
+		exit;
+	}
 
-	$new_boot_partition = $newpartition if($mountpoint eq '/boot');
-	$new_root_partition = $newpartition if($mountpoint eq '/');
-	say "... $mountpoint";
-}
+	# read the partition table
+	my $total_sectors;
+	my $pre_partition_space;
+	my $sector_size;
+	open PARTITION, "/sbin/fdisk -l '".SOURCE."'|";
+	while (<PARTITION>)
+	{
+		$total_sectors = $1 if $_ =~ /, (\d+) sectors$/;
+		$sector_size = $1 if $_ =~ /Units[ =:]* sectors of .* = (\d+) bytes/;
+		$pre_partition_space = $1 if(!$pre_partition_space && /^\/[^ ]+\s+(?:\*\s+)?(\d+)/);
+	}
+	close PARTITION;
+	die "Could not get total sectors on source disk" unless($total_sectors || DRYRUN);
+	die "Could not get sector size on source disk" unless($sector_size || DRYRUN);
+	die "Could not get pre-partition space" unless($pre_partition_space || DRYRUN);
 
-die "Unable to determine boot partition" unless($new_boot_partition);
-die "Unable to determine root partition" unless($new_root_partition);
+	# copy the MBR and space before first partition
+	run("dd", "if=".SOURCE, "of=".DESTINATION, "bs=$sector_size", "count=$pre_partition_space");
 
-my $tmp_mount = tempdir();
-say "Using temporary mount point: $tmp_mount";
+	my $partition_table;
+	my $last_partition;
+	open PARTITION, "sfdisk -d '".SOURCE."'|";
+	while (<PARTITION>)
+	{
+		if (/^([^ ]+) : .* size=\s*(\d+),/ && $2)
+		{
+			$last_partition = $1;
+		}
+		$partition_table .= $_;
+	}
+	close PARTITION;
+	$partition_table =~ s/($last_partition : start=\s*)(\d+), size=\s*\d+,/"$1$2, size=".($total_sectors-$2).","/me;
+	# I don't think this is necessary, but I'm really scared of having the source in the partiion table
+	$partition_table =~ s/${\(SOURCE)}/${\(DESTINATION)}/gm;
 
-# copy boot partition
-run("mount", "-o", "ro", "/boot");
-run("mount", $new_boot_partition, $tmp_mount);
-run("rsync", "--verbose", "-aH", "/boot/.", $tmp_mount."/.");
-run("umount", "/boot");
-run("umount", $tmp_mount);
+	print "---------- BEGIN PARTITION TABLE ----------\n$partition_table\n---------- END PARTITION TABLE ----------\n";
+	if (!DRYRUN)
+	{
+		open SFDISK, "|sfdisk ".DESTINATION;
+		print SFDISK $partition_table;
+		close SFDISK;
+	}
+
+	# give udev a chance to create partition devices
+	system "fdisk", "-l", DESTINATION;
+	sleep 2;
+
+	# format the partitions
+	open FSTAB, '</etc/fstab';
+	while(<FSTAB>)
+	{
+		chomp;
+		s/#.*//;
+		next unless my ($partition, $mountpoint, $type) = (/^\s*(\S+)\s+(\S+)\s+(\S+).*/);
+		if ($partition =~ m#^/dev/mapper#)
+		{
+			say "looking at mapped device $partition";
+			open DM_STATUS, "cryptsetup status $partition |";
+			while(<DM_STATUS>)
+			{
+				my $mapped_device;
+				if (($mapped_device) = (/^\s*device:\s+(\S+)/))
+				{
+					last unless substr($mapped_device, 0, length(SOURCE)) eq SOURCE;
+					$root_partition_mapper = $partition if($mountpoint eq '/');
+					$partition = $mapped_device;
+					last;
+				}
+			}
+			close DM_STATUS;
+		}
+		next unless substr($partition, 0, length(SOURCE)) eq SOURCE;
+
+		my $newpartition = $partition;
+		substr($newpartition, 0, length(SOURCE)) = DESTINATION;
+		print "Formatting $newpartition for $partition of type $type at $mountpoint\n";
+		die "Unable to find mkfs for type $type" unless -x "/sbin/mkfs.$type";
+		run("/sbin/mkfs.$type", $newpartition);
+
+		$new_boot_partition = $newpartition if($mountpoint eq '/boot');
+		$new_root_partition = $newpartition if($mountpoint eq '/');
+		say "... $mountpoint";
+	}
+
+	die "Unable to determine boot partition" unless($new_boot_partition);
+	die "Unable to determine root partition" unless($new_root_partition);
+
+	$tmp_mount = tempdir();
+	say "Using temporary mount point: $tmp_mount";
+
+	# copy boot partition
+	run("mount", "-o", "ro", "/boot");
+	run("mount", $new_boot_partition, $tmp_mount);
+	run("rsync", "--verbose", "-aH", "/boot/.", $tmp_mount."/.");
+	run("umount", "/boot");
+	run("umount", $tmp_mount);
+} # not JUSTFILES
 
 say "scanning portage files...";
 for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
@@ -183,6 +188,7 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 	{
 		if (/^dir (.*)$/)
 		{
+			die $1 unless(abs_path($1));
 			$objects{abs_path($1)}->{directory} = 1;
 		}
 		if (/^obj (.*) ([0-9a-f]{32}) \d+$/)
@@ -192,7 +198,7 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 			{
 				# blarg http://www.gossamer-threads.com/lists/perl/porters/293164
 				#die "?? ($1) $_ $contentsFile";
-				say "ERROR HERE: $1 $_ $contentsFile";
+				say "ERROR HERE: $1 $_ $contentsFile ($contentsFile)";
 				push @error_files, $1;
 				next;
 			}
@@ -360,8 +366,9 @@ close SYMLINKS;
 open ERROR, '>errors.txt';
 say ERROR $_ for(slash_sort @error_files);
 close ERROR;
+exit;
 
-if (!DRYRUN)
+if (!(JUSTFILES || DRYRUN))
 {
 	run("mount", $new_root_partition, $tmp_mount);
 	run("rsync", "--verbose", "-aH", "--log-file=rsync.log", "--files-from","copy.txt","/", $tmp_mount."/.");
