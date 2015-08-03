@@ -52,6 +52,11 @@ my $new_root_partition;
 my $root_partition_mapper;
 my $tmp_mount;
 
+sub clearline()
+{
+	return "\r\033[K";
+}
+
 if(!JUSTFILES)
 {
 	open MOUNT, "mount|";
@@ -215,8 +220,22 @@ say "processing portage files...";
 my %copy_files;
 my %diff_files;
 my %missing_files;
+my $num_objects = scalar(keys %objects);
+my $objects_processed = 0;
+my $start_time = time();
+my $eta = "??";
 for my $obj (keys %objects)
 {
+	$objects_processed++;
+	if($objects_processed && $objects_processed % 1000 == 0)
+	{
+		my $elapsed_time = time() - $start_time;
+		my $expected_time = $elapsed_time / ($objects_processed / $num_objects);
+		my $expected_remaining = $expected_time - $elapsed_time;
+		$eta = sprintf "%0dm%02ds", int($expected_remaining/60), $expected_remaining % 60;
+	}
+
+	printf clearline()."%d / %d (%0.02f%%) ETA: %s", $objects_processed, $num_objects, $objects_processed / $num_objects, $eta;
 	if ($objects{$obj}->{symlink})
 	{
 		#my $dest = $objects{$obj}->{symlink};
@@ -243,7 +262,7 @@ for my $obj (keys %objects)
 		#print "OBJ $obj\n";
 		if (!-e $obj)
 		{
-			say "missing $obj";
+			say clearline()."missing $obj";
 			$missing_files{$obj} = 1;
 		}
 		else
@@ -256,12 +275,13 @@ for my $obj (keys %objects)
 			}
 			else
 			{
-				say "diff $obj";
+				say clearline()."diff $obj";
 				$diff_files{$obj} = 1;
 			}
 		}
 	}
 }
+say "";
 
 my $exe_path = dirname(__FILE__);
 my $whitelists_glob = "$exe_path/whitelists.d/*";
