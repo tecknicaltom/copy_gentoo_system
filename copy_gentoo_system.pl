@@ -193,7 +193,10 @@ for my $contentsFile (</var/db/pkg/*/*/CONTENTS>)
 	{
 		if (/^dir (.*)$/)
 		{
-			die $1 unless(abs_path($1));
+			if(not abs_path($1))
+			{
+				die "Directory not found: $1 from: \"$_\" ($contentsFile)";
+			}
 			$objects{abs_path($1)}->{directory} = 1;
 		}
 		if (/^obj (.*) ([0-9a-f]{32}) \d+$/)
