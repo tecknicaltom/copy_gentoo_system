@@ -435,7 +435,7 @@ if (!(JUSTFILES || DRYRUN))
 #	run("ln", "-sv", "/proc/self/fd/0", "$tmp_mount/dev/fd/stdin");
 #	run("ln", "-sv", "/proc/self/fd/1", "$tmp_mount/dev/fd/stdout");
 #	run("ln", "-sv", "/proc/self/fd/2", "$tmp_mount/dev/fd/stderr");
-	run("ln", "-sv", "/proc/kcore", "$tmp_mount/core");
+	run("ln", "-sv", "/proc/kcore", "$tmp_mount/dev/core");
 	run("mkdir", "-v", "$tmp_mount/dev/pts");
 	run("mkdir", "-v", "$tmp_mount/dev/shm");
 
@@ -453,7 +453,7 @@ if (!(JUSTFILES || DRYRUN))
 
 	run("chroot", $tmp_mount, "eselect", "python", "set", "1");
 	run("chroot", $tmp_mount, "gcc-config", "1");
-	open BINUTILS_CONF, '-|', "binutils -l";
+	open BINUTILS_CONF, '-|', "binutils-config -l";
 	while(<BINUTILS_CONF>)
 	{
 		if(/^ \[(\d+)\].*\*$/)
